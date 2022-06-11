@@ -1,0 +1,167 @@
+#version 300 es
+precision lowp float;
+uniform float time;
+uniform vec2 resolution;
+
+in vec2 v_Coord;
+out vec4 out_color;
+
+float pi=3.141592;
+mat4 I=mat4(1,0,0,0,
+	           0,1,0,0,
+	           0,0,1,0,
+	           0,0,0,1);
+vec4 default_color=vec4(1.0,0.5,0.2,1.0);
+vec4 background=vec4(0.1,0.1,0.1,1);
+
+struct empty{
+	vec4 pos;
+	mat4 orient;
+};
+struct object{
+	vec4 pos;
+	mat4 orient;
+	int sdf;
+	float a;
+	float b;
+	float c;
+	vec4 color;
+};
+
+mat4 rotation(vec4 a, vec4 b, float angle){
+	mat4 K=mat4(0, a.w*b.z-a.z*b.w, a.y*b.w-a.w*b.y, a.z*b.y-a.y*b.z,
+		          a.z*b.w-a.w*b.z, 0, a.w*b.x-a.x*b.w, a.x*b.z-a.z*b.x,
+		          a.w*b.y-a.y*b.w, a.x*b.w-a.w*b.x, 0, a.y*b.x-a.x*b.y,
+		          a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x, 0);
+	mat4 M=I+sin(angle)*K+(1.0-cos(angle))*K*K;
+	return M;
+}
+
+empty camera;
+empty light;
+object scene[1];
+
+vec4 l2gs(object o,vec4 n1){return o.orient*n1+o.pos;}
+vec4 l2gs(empty o,vec4 n1){return o.orient*n1+o.pos;}
+
+vec4 g2ls(object o,vec4 n1){return transpose(o.orient)*(n1-o.pos);}
+vec4 g2ls(empty o,vec4 n1){return transpose(o.orient)*(n1-o.pos);}
+
+float dist(object o, vec4 n, inout vec4 norm);
+
+int ray_march(vec4 init_v,vec4 n,float e,float b,inout vec4 c,inout vec4 norm){
+	n=normalize(n);
+	c=init_v;
+	bool toBreak=false;
+	for(int t=0;t<200;t++){
+		if(length(init_v-c)>b){return -1;}
+		float d_min=1000.0;
+		for(int i=0;i<scene.length();i++){
+			object o=scene[i];
+			float d=dist(o,g2ls(o,c),norm);
+			if(d<d_min){d_min=d;}
+			if(d<e){
+				  return i;
+			}
+		}
+		c+=n*d_min;
+	}
+	return -1;
+}
+
+vec4 shader(object o, vec4 n, vec4 norm, vec4 cam, vec4 l){
+	//vec3 cam=vec3(cam4.x,cam4.y,cam4.z);
+	//vec3 l=vec3(l4.x,l4.y,l4.z);
+	//vec3 n=vec3(n4.x,n4.y,n4.z);
+
+
+	float k_dif=0.5;//diffusion koefficient
+	float default_dif=0.4;
+	float k_ref=0.5;//reflection koefficient
+	bool shadows=false;
+
+	float dif=0.0;
+	vec4 ref=vec4(0);
+	if(shadows){
+		vec4 c;
+		vec4 nor;
+		vec4 k=normalize(l-n);
+		int i=ray_march(n+k*0.1,k,0.01,30.0,c,nor);
+		if(i!=-1){
+			return o.color*default_dif;
+		}
+	}
+	if(k_dif!=1.0){
+		dif=max(dot(norm,normalize(l-n)),0.0)*k_dif;
+	}
+	if(k_ref!=0.0){
+		ref=vec4(1,1,1,1)*max(dot(norm,normalize(
+		normalize(cam-n)+normalize(l-n)))*
+		10.0-9.0,0.0)*k_ref;
+	}
+	return o.color*(dif+default_dif)+ref;
+}
+
+float dist(object o, vec4 n, inout vec4 norm){
+	float d;
+	vec4 v_dist;
+	if(o.sdf==0){
+		v_dist=n;
+		d=length(v_dist)-o.a;
+		norm=normalize(v_dist);
+	}
+  if(o.sdf==1){
+  	v_dist=max(abs(n)-vec4(o.a,o.a,o.a,o.a),vec4(0));
+    d=length(v_dist);
+    norm=normalize(v_dist*dot(v_dist,n));
+  }
+  if(o.sdf==2){
+  	v_dist=max(abs(n)-vec4(abs(n.xyz)/length(n.xyz)*o.a,o.b),vec4(0));
+  	d=length(v_dist);
+  	norm=normalize(vec4(n.xyz*v_dist.xyz/v_dist.xyz,v_dist.w*n.w));
+  }
+  return d;
+}
+
+void init(void){
+	float ax=pi/8.0;
+	mat4 Mx=mat4(1,        0,       0, 0,
+		           0,  cos(ax), sin(ax), 0,
+		           0, -sin(ax), cos(ax), 0,
+		           0,        0,       0, 1);
+
+  camera=empty(vec4(0,0,-20,0),Mx);
+  light=empty(vec4(10,10,-10,0),I);
+  mat4 Mcube=rotation(vec4(1.0/sqrt(2.0),-1.0/sqrt(2.0),0,0),vec4(1.0/sqrt(6.0),1.0/sqrt(6.0),sqrt(2.0/3.0),0),pi/3.0);
+  object cube=object(vec4(0,-2,0,0),Mcube,1,2.0,0.0,0.0,default_color);
+  object sphere=object(vec4(0,0,0,0),I,0,0.1,0.0,0.0,vec4(1,0,0,0));
+  object cylinder=object(vec4(0,0,0,0.5),rotation(vec4(1,0,0,0),vec4(0,1,0,0),pi/2.0),2,2.0,2.0,0.0,vec4(1,1,0,0));
+
+  scene[0]=cube;
+}
+
+void update(float time){
+	//light4.orient=rotation(vec4(0,-1,0,0),vec4(0,0,0,1),time/2.0)*light4.orient;
+	//light4.pos=light4.orient*light4.pos;
+	camera.orient=rotation(vec4(0,1,0,0),vec4(0,0,0,1),time/5.0)*camera.orient;
+	camera.pos=camera.orient*camera.pos;
+	//scene[0].orient=rotation(vec4(1,0,0,0),vec4(0,1,0,0),time)*scene[0].orient;
+  camera.pos.w=2.5*cos(time/2.0);
+  //light4.pos.w=camera4.pos.w;
+}
+
+void main(void) {
+	init();
+	update(time);
+	vec2 p=vec2(v_Coord.x*resolution.x,v_Coord.y*resolution.y)/min(resolution.x,resolution.y);
+	vec4 color=background;
+	vec4 n=camera.orient*normalize(vec4(p,2,0));
+	vec4 c;
+	vec4 norm;
+	int i=ray_march(camera.pos,n,0.02,30.0,c,norm);
+	if(i!=-1){
+		color=default_color;
+		color=shader(scene[i],c,scene[i].orient*norm,camera.pos,light.pos);
+	}
+	out_color=color;
+}
