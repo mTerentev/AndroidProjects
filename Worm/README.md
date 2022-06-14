@@ -1,5 +1,5 @@
 Very simple game like "Snake". My first attempt to use libGDX.
-I separated model calculation, rendering and input processing in 3 separated threads, that makes game more stable and less glitchy.
+Model calculation, rendering and input processing are separated on 3 independent threads, that makes game more stable and less glitchy.
 
 
 
